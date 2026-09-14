@@ -14,6 +14,23 @@ import AppKit
 
 extension NativeTextViewCoordinator {
 
+    func unfinishedWikiLink(in text: NSString, at caret: Int, codeTokens: [MarkdownToken]) -> WikiLinkSelection? {
+        guard caret >= 2, caret <= text.length else { return nil }
+        let line = text.lineRange(for: NSRange(location: caret, length: 0))
+        let beforeCaret = NSRange(location: line.location, length: caret - line.location)
+        let opening = text.range(of: "[[", options: .backwards, range: beforeCaret)
+        guard opening.location != NSNotFound else { return nil }
+        let range = NSRange(location: opening.location, length: caret - opening.location)
+        guard !MarkdownDetection.isInsideCodeBlock(range: range, codeTokens: codeTokens) else { return nil }
+        if opening.location > 0, text.character(at: opening.location - 1) == 0x21 { return nil }
+        var preceding = opening.location
+        while preceding > 0, text.character(at: preceding - 1) == 0x5C { preceding -= 1 }
+        guard (opening.location - preceding).isMultiple(of: 2) else { return nil }
+        let name = text.substring(with: NSRange(location: opening.location + 2, length: range.length - 2))
+        guard name.rangeOfCharacter(from: CharacterSet(charactersIn: "[]|\n\r`")) == nil else { return nil }
+        return WikiLinkSelection(displayRange: range, storageRange: nil, placeholder: text.substring(with: range))
+    }
+
     /// Recompute the preview anchor for the active inline token (used when scrolling).
     func refreshActiveLinkCaretRect() {
         guard isWikiLinkActive || isImageEmbedActive, let tv = textView else { return }

@@ -65,6 +65,8 @@ public enum WikiLinkService {
         from storageText: String,
         nameForID: ((String) -> String?)? = nil
     ) -> (display: String, metadata: [RangeKey: LinkMetadata]) {
+        guard storageText.contains("[[") else { return (storageText, [:]) }
+        let linkRanges = parsedLinkRanges(in: storageText)
         let nsStorage = storageText as NSString
         let fullRange = NSRange(location: 0, length: nsStorage.length)
         var result = ""
@@ -74,6 +76,7 @@ public enum WikiLinkService {
         var displayLength = 0
 
         for match in storageLinkRegex.matches(in: storageText, options: [], range: fullRange) {
+            guard linkRanges.contains(RangeKey(match.range)) else { continue }
             let prefixLength = match.range.location - cursor
             if prefixLength > 0 {
                 let prefixRange = NSRange(location: cursor, length: prefixLength)
@@ -296,7 +299,14 @@ public enum WikiLinkService {
             }
             if !matched { i += 1 }
         }
-        return result
+        let linkRanges = parsedLinkRanges(in: s as String)
+        return result.filter { linkRanges.contains(RangeKey($0.range)) }
+    }
+
+    private static func parsedLinkRanges(in text: String) -> Set<RangeKey> {
+        Set(MarkdownTokenizer.parseTokensViaAST(in: text).compactMap { token in
+            token.kind == .wikiLink || token.kind == .imageEmbed ? RangeKey(token.range) : nil
+        })
     }
 
     /// Resolve a clicked link's id from the caret's `.wikiLinkID` attribute, else its display string.
@@ -325,4 +335,3 @@ public enum WikiLinkService {
         return NSRange(location: displayRange.location + displayFragment.length, length: 0)
     }
 }
-

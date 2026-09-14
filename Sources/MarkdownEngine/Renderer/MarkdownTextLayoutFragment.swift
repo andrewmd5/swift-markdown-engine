@@ -14,6 +14,7 @@ import CoreText
 // MARK: - Custom attribute keys for rendering overlays
 
 extension NSAttributedString.Key {
+    static let markdownInlineDecoration = NSAttributedString.Key("MarkdownInlineDecoration")
     static let latexImage = NSAttributedString.Key("LatexRenderedImage")
     static let latexBounds = NSAttributedString.Key("LatexImageBounds")
     static let latexIsBlock = NSAttributedString.Key("LatexIsBlock")
@@ -96,6 +97,7 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
         for fill in blockBackgroundFills(at: .zero) {
             bounds = bounds.union(fill.rect)
         }
+        for decoration in inlineDecorations(at: .zero) { bounds = bounds.union(decoration.bounds) }
         return bounds
     }
 
@@ -107,12 +109,37 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
 
         // 1b. Line-box fills (`==highlight==` and friends), behind text
         drawBlockBackgrounds(at: point, in: context)
+        let decorations = inlineDecorations(at: point)
+        for run in decorations {
+            context.saveGState()
+            context.addPath(CGPath(roundedRect: run.bounds,
+                cornerWidth: run.style.cornerRadius * run.scale,
+                cornerHeight: run.style.cornerRadius * run.scale, transform: nil))
+            context.clip()
+            run.style.draw(run.style.background, in: context, bounds: run.bounds)
+            context.restoreGState()
+        }
 
         // 2. LaTeX images (behind text — hidden markers are invisible anyway)
         drawLatexImages(at: point, in: context)
 
         // 3. Normal text
-        super.draw(at: point, in: context)
+        if decorations.isEmpty {
+            super.draw(at: point, in: context)
+        } else {
+            context.saveGState()
+            context.beginTransparencyLayer(auxiliaryInfo: nil)
+            super.draw(at: point, in: context)
+            context.setBlendMode(.sourceAtop)
+            for run in decorations {
+                context.saveGState()
+                context.clip(to: run.bounds.insetBy(dx: run.style.horizontalPadding * run.scale, dy: 0))
+                run.style.draw(run.style.foreground, in: context, bounds: run.bounds)
+                context.restoreGState()
+            }
+            context.endTransparencyLayer()
+            context.restoreGState()
+        }
 
         // 4. Task checkboxes (on top of hidden [ ]/[x] markers)
         drawTaskCheckboxes(at: point, in: context)
@@ -130,6 +157,36 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
     }
 
     // MARK: - Helpers
+
+    private struct InlineDecorationRun {
+        let bounds: CGRect
+        let style: MarkdownInlineDecoration
+        let scale: CGFloat
+    }
+
+    private func inlineDecorations(at point: CGPoint) -> [InlineDecorationRun] {
+        guard let storage = textStorage, let range = fragmentNSRange else { return [] }
+        var result: [InlineDecorationRun] = []
+        storage.enumerateAttribute(.markdownInlineDecoration, in: range) { value, decorated, _ in
+            guard let style = value as? MarkdownInlineDecoration else { return }
+            let local = NSRange(location: decorated.location - range.location, length: decorated.length)
+            let font = storage.attribute(.font, at: decorated.location, effectiveRange: nil) as? NSFont
+            let scale = (font?.pointSize ?? style.fontSize) / style.fontSize
+            for line in textLineFragments {
+                let hit = NSIntersectionRange(line.characterRange, local)
+                guard hit.length > 0 else { continue }
+                let start = line.locationForCharacter(at: hit.location).x
+                let end = line.locationForCharacter(at: NSMaxRange(hit)).x
+                let padding = style.horizontalPadding * scale
+                let bounds = CGRect(
+                    x: point.x + line.typographicBounds.minX + min(start, end) - padding,
+                    y: point.y + line.typographicBounds.midY - style.lineHeight * scale / 2,
+                    width: abs(end - start) + padding * 2, height: style.lineHeight * scale)
+                result.append(InlineDecorationRun(bounds: bounds, style: style, scale: scale))
+            }
+        }
+        return result
+    }
 
     /// NSRange in the document for this fragment's content.
     private var fragmentNSRange: NSRange? {

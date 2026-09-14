@@ -218,7 +218,7 @@ enum MarkdownStyler {
             return (lo, hi)
         }
         let codeTokens = classified?.code ?? tokens.filter { $0.kind == .codeBlock || $0.kind == .inlineCode }
-        let baseFont = NSFont(name: fontName, size: fontSize) ?? NSFont.systemFont(ofSize: fontSize)
+        let baseFont = configuration.resolvedFont(name: fontName, size: fontSize)
         let baseDefaultLineHeight = ceil(
             layoutBridge?.defaultLineHeight(for: baseFont)
             ?? (baseFont.ascender - baseFont.descender + baseFont.leading)
@@ -234,8 +234,7 @@ enum MarkdownStyler {
             layoutBridge: layoutBridge,
             baseDefaultLineHeight: baseDefaultLineHeight,
             codeBackgroundColor: codeBackgroundColor,
-            latexMarkerFont: NSFont(name: fontName, size: hiddenMarkerSize)
-                ?? NSFont.systemFont(ofSize: hiddenMarkerSize),
+            latexMarkerFont: configuration.resolvedFont(name: fontName, size: hiddenMarkerSize),
             configuration: configuration,
             wikiLinkIDProvider: wikiLinkIDProvider,
             scopeBounds: scopeBounds,

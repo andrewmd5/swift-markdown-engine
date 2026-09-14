@@ -25,6 +25,7 @@ import Foundation
 /// reproduce a system-native macOS look using `NSColor` dynamic system
 /// colors, so light/dark-mode switching keeps working without extra code.
 public struct MarkdownEditorTheme: Sendable {
+    public var wikiLinkDecoration: MarkdownInlineDecoration?
 
     // MARK: Text colors
 
@@ -93,7 +94,8 @@ public struct MarkdownEditorTheme: Sendable {
         latexLightModeText: NSColor = .black,
         latexDarkModeText: NSColor = .white,
         strikethroughColor: NSColor = .labelColor,
-        highlightColor: NSColor = .systemOrange.withAlphaComponent(0.4)
+        highlightColor: NSColor = .systemOrange.withAlphaComponent(0.4),
+        wikiLinkDecoration: MarkdownInlineDecoration? = nil
     ) {
         self.bodyText = bodyText
         self.mutedText = mutedText
@@ -107,6 +109,7 @@ public struct MarkdownEditorTheme: Sendable {
         self.latexDarkModeText = latexDarkModeText
         self.strikethroughColor = strikethroughColor
         self.highlightColor = highlightColor
+        self.wikiLinkDecoration = wikiLinkDecoration
     }
 
     /// System-native palette built from `NSColor` dynamic system colors.

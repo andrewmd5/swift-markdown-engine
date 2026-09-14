@@ -14,6 +14,7 @@
 //
 
 import AppKit
+import CoreText
 import Foundation
 
 // MARK: - Top-level Configuration
@@ -26,6 +27,7 @@ import Foundation
 /// defaults used by the Nodes app and have been chosen empirically.
 public struct MarkdownEditorConfiguration: Sendable {
 
+    public var usesSystemFont: Bool
     public var theme: MarkdownEditorTheme
     public var services: MarkdownEditorServices
     public var markers: MarkerStyle
@@ -120,8 +122,10 @@ public struct MarkdownEditorConfiguration: Sendable {
         extensions: [any MarkdownExtension] = [],
         cursorFollowsSpanInk: Bool = false,
         directives: [any MarkdownDirective] = [],
-        directiveSettings: DirectiveRegistrySettings = .default
+        directiveSettings: DirectiveRegistrySettings = .default,
+        usesSystemFont: Bool = false
     ) {
+        self.usesSystemFont = usesSystemFont
         self.theme = theme
         self.services = services
         self.markers = markers
@@ -150,6 +154,22 @@ public struct MarkdownEditorConfiguration: Sendable {
         self.cursorFollowsSpanInk = cursorFollowsSpanInk
         self.directives = directives
         self.directiveSettings = directiveSettings
+    }
+
+    func resolvedFont(name: String, size: CGFloat) -> NSFont {
+        if usesSystemFont {
+            guard let font = CTFontCreateUIFontForLanguage(.system, size, nil) else {
+                return .systemFont(ofSize: size)
+            }
+            let descriptor = CTFontDescriptorCreateWithAttributes(
+                [kCTFontTraitsAttribute: [kCTFontWeightTrait: 0]] as CFDictionary)
+            let resolved = CTFontCreateCopyWithAttributes(font, size, nil, descriptor)
+            return CTFontCreateWithGraphicsFont(
+                CTFontCopyGraphicsFont(resolved, nil), size, nil,
+                CTFontDescriptorCreateWithAttributes(
+                    [kCTFontOpticalSizeAttribute: 0] as CFDictionary)) as NSFont
+        }
+        return NSFont(name: name, size: size) ?? .systemFont(ofSize: size)
     }
 
     public static let `default` = MarkdownEditorConfiguration()
@@ -593,10 +613,12 @@ public struct ParagraphStyle: Sendable {
     public var spacingFactor: CGFloat
     /// Extra height (points) added to the default paragraph line height.
     public var lineHeightExtraSpacing: CGFloat
+    public var lineSpacing: CGFloat
 
-    public init(spacingFactor: CGFloat = 0.3, lineHeightExtraSpacing: CGFloat = 2) {
+    public init(spacingFactor: CGFloat = 0.3, lineHeightExtraSpacing: CGFloat = 2, lineSpacing: CGFloat = 0) {
         self.spacingFactor = spacingFactor
         self.lineHeightExtraSpacing = lineHeightExtraSpacing
+        self.lineSpacing = lineSpacing
     }
 
     public static let `default` = ParagraphStyle()

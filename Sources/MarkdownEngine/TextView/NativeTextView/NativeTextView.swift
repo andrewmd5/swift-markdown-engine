@@ -17,6 +17,22 @@ import AppKit
 import UniformTypeIdentifiers
 
 final class NativeTextView: NSTextView {
+    override func becomeFirstResponder() -> Bool {
+        let result = super.becomeFirstResponder()
+        (delegate as? NativeTextViewCoordinator)?.controller?.scheduleRefresh()
+        return result
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let result = super.resignFirstResponder()
+        (delegate as? NativeTextViewCoordinator)?.controller?.scheduleRefresh()
+        return result
+    }
+
+    override func unmarkText() {
+        super.unmarkText()
+        (delegate as? NativeTextViewCoordinator)?.controller?.scheduleRefresh()
+    }
     // MARK: Frame & overscroll state
     var baseContentHeight: CGFloat = 0
     var activeBottomOverscroll: CGFloat = 0
@@ -99,6 +115,7 @@ final class NativeTextView: NSTextView {
         let nsText = self.string as NSString
         let paragraph = nsText.paragraphRange(for: marked)
         coord.restyleParagraphs([paragraph], in: self)
+        coord.controller?.scheduleRefresh()
     }
 
     deinit { caretIndicatorObservation?.invalidate() }

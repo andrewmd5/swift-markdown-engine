@@ -416,7 +416,11 @@ extension NativeTextViewCoordinator {
         let currentText = textView.string as NSString
         let range = request.selection.displayRange
         guard range.location != NSNotFound,
+              range.location >= 0, range.length >= 0,
               range.location + range.length <= currentText.length else {
+            return
+        }
+        guard request.isImageEmbedMode || currentText.substring(with: range) == request.selection.placeholder else {
             return
         }
 

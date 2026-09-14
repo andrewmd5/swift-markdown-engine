@@ -22,6 +22,18 @@ extension NativeTextViewCoordinator {
         pattern: #"^[ \t]*(?:(?:\d+[.)])|[-•*+])(?:[ \t]+\[[ xX]\])?[ \t]+"#
     )
 
+    private func publishEditedText(_ value: String) {
+        let document = documentId
+        let previousValue = text
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.documentId == document, self.lastComputedStorage == value,
+                  self.text == previousValue else { return }
+            self.lastSyncedText = value
+            self.text = value
+        }
+    }
+
+
     /// Supplies a per-document `UndoManager` to the text view.
     ///
     /// AppKit reuses one `NSTextView` across every open document, so the built-in
@@ -37,7 +49,21 @@ extension NativeTextViewCoordinator {
         }
         let manager = UndoManager()
         undoManagers[key] = manager
+        for name in [Notification.Name.NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(didRestoreUndo(_:)), name: name, object: manager)
+        }
         return manager
+    }
+
+    @objc private func didRestoreUndo(_ notification: Notification) {
+        guard let view = textView, !isWritingToolsActive,
+              notification.object as? UndoManager === undoManagers[documentId ?? "__default__"] else { return }
+        parseGeneration &+= 1
+        pendingEditCount = 0
+        backtickCensusNeedsRescan = true
+        textDidChange(Notification(name: NSText.didChangeNotification, object: view))
+        updateSelectionStates(view)
     }
 
     /// Drops `documentId`'s undo stack when its switch-away snapshot no longer
@@ -92,10 +118,8 @@ extension NativeTextViewCoordinator {
             guard !tv.hasMarkedText() else { return }
             if tv.string != lastSyncedText {
                 let rawText = tv.string
-                DispatchQueue.main.async {
-                    self.lastSyncedText = rawText
-                    self.text = rawText
-                }
+                lastComputedStorage = rawText
+                publishEditedText(rawText)
             }
             if let bottomTextView = tv as? NativeTextView,
                let scrollView = tv.enclosingScrollView {
@@ -196,10 +220,7 @@ extension NativeTextViewCoordinator {
             }
 #endif
             if storageState.storage != self.lastSyncedText {
-                DispatchQueue.main.async {
-                    self.lastSyncedText = storageState.storage
-                    self.text = storageState.storage
-                }
+                publishEditedText(storageState.storage)
             }
         }
 
@@ -697,6 +718,11 @@ extension NativeTextViewCoordinator {
             }
         }
 
+        if inlineContext == nil, isTyping, !tv.hasMarkedText(),
+           let selection = unfinishedWikiLink(in: nsText, at: selLocation, codeTokens: codeTokens) {
+            inlineSelectionState = InlineSelectionState(kind: .wikiLink, selection: selection)
+        }
+
         DispatchQueue.main.async {
             self.isWikiLinkActive = inlineSelectionState?.kind == .wikiLink
             self.isImageEmbedActive = isInsideImageEmbed
@@ -1034,6 +1060,7 @@ extension NativeTextViewCoordinator {
     }
 
     func updateSelectionStates(_ tv: NSTextView, nsText: NSString? = nil) {
+        Task { @MainActor [weak controller] in controller?.scheduleRefresh() }
         let nsText = nsText ?? (tv.string as NSString)
         let selRange = tv.selectedRange()
         let bus = configuration.services.bus

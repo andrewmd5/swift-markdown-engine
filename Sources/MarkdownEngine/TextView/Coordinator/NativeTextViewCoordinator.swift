@@ -18,6 +18,7 @@ import SwiftUI
 /// in extensions (Autocorrect, CodeBlocks, Find, InlineSelection,
 /// Notifications, Restyling, TextDelegate, WritingTools).
 public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
+    weak var controller: MarkdownEditorController?
     var documentId: String?
     /// Remembered scroll offset (`bounds.origin.y`) per `documentId` — saved on
     /// switch-away, restored on switch-back. Dies with the coordinator, so an
@@ -95,6 +96,7 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
     /// the `didEnsureLayoutForCurrentDocument` suppression pattern.
     var isRebuildingDocument = false
     var lastSyncedText: String
+    func updateTextBinding(_ text: Binding<String>) { self._text = text }
     var isProgrammaticEdit: Bool = false
     var isWritingToolsActive: Bool = false
     var wtStartDocumentId: String?

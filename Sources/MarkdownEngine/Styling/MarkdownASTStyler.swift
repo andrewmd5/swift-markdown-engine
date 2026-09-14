@@ -33,7 +33,7 @@ enum MarkdownASTStyler {
         precomputedBlocks: [Block]? = nil,
         configuration: MarkdownEditorConfiguration = .default
     ) -> [StyledRange] {
-        let baseFont = NSFont(name: fontName, size: fontSize) ?? .systemFont(ofSize: fontSize)
+        let baseFont = configuration.resolvedFont(name: fontName, size: fontSize)
         let baseLineHeight = ceil(baseFont.ascender - baseFont.descender + baseFont.leading)
         let baseParagraphSpacing = ceil(baseLineHeight * configuration.paragraph.spacingFactor)
         let codeFontSize = round(fontSize * configuration.codeBlock.fontSizeScale)
@@ -64,7 +64,7 @@ enum MarkdownASTStyler {
             codeFont: codeFont,
             codeBackground: configuration.services.syntaxHighlighter.backgroundColor(),
             codeParagraphStyle: codePara,
-            inlineMarkerFont: NSFont(name: fontName, size: hiddenSize) ?? .systemFont(ofSize: hiddenSize),
+            inlineMarkerFont: configuration.resolvedFont(name: fontName, size: hiddenSize),
             caret: caretLocation,
             selection: selection,
             config: configuration,
@@ -890,13 +890,17 @@ enum MarkdownASTStyler {
         let nodeName = ctx.ns.substring(with: name)
         let linkID = ctx.wikiLinkID(range)
         var contentAttrs: [NSAttributedString.Key: Any] = [:]
+        if let decoration = ctx.theme.wikiLinkDecoration {
+            contentAttrs[.markdownInlineDecoration] = decoration
+            contentAttrs[.foregroundColor] = ctx.theme.bodyText
+        }
         if let linkID { contentAttrs[.wikiLinkID] = linkID }
         if !ctx.isActive(range) {
             // Resolve by the stable UUID when present 
             let exists = ctx.config.services.wikiLinks.resolve(displayName: linkID ?? nodeName, range: name)?.exists ?? false
             if exists {
                 contentAttrs[.link] = linkID ?? nodeName
-            } else {
+            } else if ctx.theme.wikiLinkDecoration == nil {
                 contentAttrs[.foregroundColor] = ctx.theme.disabledText
             }
         }
@@ -950,7 +954,15 @@ enum MarkdownASTStyler {
                 }
                 shrinkInlineMarkers(children, ctx: ctx, forceReveal: active, into: &attrs)
             case .wikiLink(let range, _, _, let markers):
-                if !(forceReveal || ctx.isActive(range)) { shrink(markers, ctx: ctx, into: &attrs) }
+                if !(forceReveal || ctx.isActive(range)) {
+                    shrink(markers, ctx: ctx, into: &attrs)
+                    if let decoration = ctx.theme.wikiLinkDecoration {
+                        for marker in markers where marker.length > 0 {
+                            attrs.append((marker, [.foregroundColor: NSColor.clear,
+                                .kern: decoration.horizontalPadding / CGFloat(marker.length)]))
+                        }
+                    }
+                }
             case .image(let range, _, _, let markers):
                 if !(forceReveal || ctx.isActive(range)) { shrink(markers, ctx: ctx, into: &attrs) }
             case .escape(let range, _, let marker):

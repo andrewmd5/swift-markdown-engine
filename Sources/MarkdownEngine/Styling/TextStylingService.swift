@@ -29,11 +29,11 @@ struct TextStylingService {
         layoutBridge: LayoutBridge? = nil,
         configuration: MarkdownEditorConfiguration = .default
     ) -> (font: NSFont, style: NSMutableParagraphStyle) {
-        let baseFont = NSFont(name: fontName, size: fontSize) ?? NSFont.systemFont(ofSize: fontSize)
+        let baseFont = configuration.resolvedFont(name: fontName, size: fontSize)
         let defaultLineHeight = layoutBridgeDefaultLineHeight(for: baseFont, using: layoutBridge)
         let paragraph = NSMutableParagraphStyle()
         paragraph.minimumLineHeight = ceil(defaultLineHeight) + configuration.paragraph.lineHeightExtraSpacing
-        paragraph.lineSpacing = 0
+        paragraph.lineSpacing = configuration.paragraph.lineSpacing
         let baseParagraphSpacing = ceil(defaultLineHeight * configuration.paragraph.spacingFactor)
         paragraph.paragraphSpacing = baseParagraphSpacing
         paragraph.paragraphSpacingBefore = 0

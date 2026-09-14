@@ -85,6 +85,26 @@ extension NativeTextViewWrapper.Coordinator {
         return enclosingToken(of: .extensionSpan(StrikethroughExtension.identifier), for: range, in: nsText as String) != nil
     }
 
+    func isSelectionUnderlined(in nsText: NSString, range: NSRange) -> Bool {
+        enclosingToken(of: .extensionSpan(UnderlineExtension.identifier), for: range, in: nsText as String) != nil
+    }
+
+    func toggleUnderline() {
+        guard let tv = textView else { return }
+        let selection = tv.selectedRange()
+        if let token = enclosingToken(of: .extensionSpan(UnderlineExtension.identifier), for: selection, in: tv.string) {
+            unwrapToken(token, leftReplacement: "", rightReplacement: "")
+            return
+        }
+        let source = tv.string as NSString
+        let range = selection.length == 0 ? wordRange(at: selection.location, in: source) ?? selection : selection
+        let content = source.substring(with: range)
+        guard replacePreservingAttributes(in: range, with: "<u>" + content + "</u>", retaining: range, at: 3) else { return }
+        tv.setSelectedRange(NSRange(location: selection.location + 3, length: selection.length))
+    }
+
+    func applyChecklist() { applyList(prefix: "- [ ] ") }
+
     func isSelectionInlineCode(in nsText: NSString, range: NSRange) -> Bool {
         return enclosingToken(of: .inlineCode, for: range, in: nsText as String) != nil
     }
@@ -137,8 +157,6 @@ extension NativeTextViewWrapper.Coordinator {
         at newOffset: Int
     ) -> Bool {
         guard let tv = textView, let storage = tv.textStorage else { return false }
-        guard tv.shouldChangeText(in: range, replacementString: newText) else { return false }
-
         let replacement = NSMutableAttributedString(string: newText, attributes: tv.typingAttributes)
         let carried = storage.attributedSubstring(from: retained)
         let target = NSRange(location: newOffset, length: carried.length)
@@ -148,9 +166,32 @@ extension NativeTextViewWrapper.Coordinator {
         if NSMaxRange(target) <= replacement.length {
             replacement.replaceCharacters(in: target, with: carried)
         }
-        storage.replaceCharacters(in: range, with: replacement)
-        tv.didChangeText()
+        replaceFormatting(in: range, with: replacement)
         return true
+    }
+
+    private func replaceFormatting(in range: NSRange, with replacement: NSAttributedString,
+                                   restoringSelection: NSRange? = nil) {
+        guard let tv = textView, let storage = tv.textStorage else { return }
+        let previous = storage.attributedSubstring(from: range)
+        let previousSelection = tv.selectedRange()
+        let document = documentId
+        let undo = tv.undoManager
+        let recordsUndo = undo?.isUndoRegistrationEnabled == true
+        let wasProgrammatic = isProgrammaticEdit
+        isProgrammaticEdit = true
+        defer { isProgrammaticEdit = wasProgrammatic }
+        if recordsUndo { undo?.disableUndoRegistration() }
+        tv.insertText(replacement, replacementRange: range)
+        if recordsUndo {
+            undo?.enableUndoRegistration()
+            undo?.registerUndo(withTarget: tv) { [weak self] _ in
+                guard let self, self.documentId == document else { return }
+                self.replaceFormatting(in: NSRange(location: range.location, length: replacement.length),
+                                       with: previous, restoringSelection: previousSelection)
+            }
+        }
+        if let restoringSelection { tv.setSelectedRange(restoringSelection) }
     }
 
     private func unwrapToken(_ token: MarkdownToken, leftReplacement: String, rightReplacement: String) {
@@ -165,7 +206,7 @@ extension NativeTextViewWrapper.Coordinator {
             at: (leftReplacement as NSString).length
         ) else { return }
         let newSelectionLocation = token.range.location + leftReplacement.count
-        tv.setSelectedRange(NSRange(location: newSelectionLocation, length: content.count))
+        tv.setSelectedRange(NSRange(location: newSelectionLocation, length: content.utf16.count))
     }
 
     func isSelectionHeading(level: Int, in nsText: NSString, range: NSRange) -> Bool {
@@ -198,7 +239,7 @@ extension NativeTextViewWrapper.Coordinator {
         var content = rawLine
         while content.hasPrefix("#") { content.removeFirst() }
         content = content.trimmingCharacters(in: .whitespaces)
-        let prefix = String(repeating: "#", count: level) + " "
+        let prefix = level == 0 ? "" : String(repeating: "#", count: level) + " "
         // lineRange(for:) includes the trailing line terminator; preserve it so
         // applying a heading to a non-final line doesn't swallow the newline and
         // merge the line with the next one (mirrors applyList's suffix handling).
@@ -216,7 +257,7 @@ extension NativeTextViewWrapper.Coordinator {
             retaining: retained,
             at: (prefix as NSString).length
         ) else { return }
-        let newSel = NSRange(location: lineRange.location + prefix.count, length: content.count)
+        let newSel = NSRange(location: lineRange.location + prefix.utf16.count, length: content.utf16.count)
         tv.setSelectedRange(newSel)
     }
 
@@ -225,33 +266,31 @@ extension NativeTextViewWrapper.Coordinator {
     }
 
     private func applyList(prefix: String) {
-        guard let tv = textView else { return }
-        let nsText = tv.string as NSString
-        let selRange = tv.selectedRange()
-        let startLine = nsText.lineRange(for: selRange)
-        let originalLine = nsText.substring(with: startLine)
-        let lineText = originalLine.trimmingCharacters(in: .newlines)
-        var content = lineText
-        if content.hasPrefix(prefix) {
-            content = String(content.dropFirst(prefix.count))
-        }
-        let newLine = prefix + content
-        let suffix = originalLine.hasSuffix("\n") ? "\n" : ""
-        let replacement = newLine + suffix
-        // See applyHeading: `content` survives verbatim, so its attributes must
-        // travel with it or a wiki link on this line loses its UUID.
-        let contentRange = (originalLine as NSString).range(of: content)
-        let retained = contentRange.location == NSNotFound
-            ? NSRange(location: startLine.location, length: 0)
-            : NSRange(location: startLine.location + contentRange.location, length: contentRange.length)
-        guard replacePreservingAttributes(
-            in: startLine,
-            with: replacement,
-            retaining: retained,
-            at: (prefix as NSString).length
-        ) else { return }
-        let newSel = NSRange(location: startLine.location + prefix.count, length: content.count)
-        tv.setSelectedRange(newSel)
+        guard let tv = textView, let storage = tv.textStorage else { return }
+        let source = tv.string as NSString
+        let selection = tv.selectedRange()
+        let selectedContent = NSRange(location: selection.location, length: max(0, selection.length - 1))
+        let range = source.lineRange(for: selectedContent)
+        let replacement = NSMutableAttributedString(string: "")
+        var location = range.location
+        repeat {
+            let line = source.lineRange(for: NSRange(location: location, length: 0))
+            let value = source.substring(with: line) as NSString
+            let indent = value.range(of: #"^[\t ]*"#, options: .regularExpression).length
+            let body = value.substring(from: indent) as NSString
+            let marker = body.range(of: #"^(?:[-+*] |[0-9]+[.)] )(?:\[[ xX]\] )?"#,
+                                    options: .regularExpression)
+            let contentStart = indent + (marker.location == NSNotFound ? 0 : marker.length)
+            replacement.append(storage.attributedSubstring(from: NSRange(location: location, length: indent)))
+            replacement.append(NSAttributedString(string: prefix, attributes: tv.typingAttributes))
+            replacement.append(storage.attributedSubstring(from: NSRange(
+                location: location + contentStart, length: line.length - contentStart)))
+            location = NSMaxRange(line)
+            if line.length == 0 { break }
+        } while location < NSMaxRange(range)
+        replaceFormatting(in: range, with: replacement)
+        tv.setSelectedRange(NSRange(location: range.location + prefix.utf16.count,
+                                    length: max(0, replacement.length - prefix.utf16.count)))
     }
 
     @objc func didMarkdownUnorderedList(_ sender: Any?) {
@@ -523,7 +562,7 @@ extension NativeTextViewWrapper.Coordinator {
             retaining: coreOldRange,
             at: (leading as NSString).length + (marker as NSString).length
         ) else { return }
-        let newRange = NSRange(location: range.location + leadingWS + marker.count, length: core.count)
+        let newRange = NSRange(location: range.location + leading.utf16.count + marker.utf16.count, length: core.utf16.count)
         tv.setSelectedRange(newRange)
     }
 }

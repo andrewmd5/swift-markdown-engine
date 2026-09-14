@@ -71,6 +71,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
     public var documentId: String
     /// When `false` the editor renders read-only with no caret.
     public var isEditable: Bool
+    public var controller: MarkdownEditorController?
     /// Optional paste hook. Return a Markdown image-embed string (e.g.
     /// `"![[my-image]]"`) to insert at the caret, or `nil` to fall through
     /// to the system's default plain-text paste.
@@ -150,6 +151,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         fontSize: CGFloat = 16,
         documentId: String = "default",
         isEditable: Bool = true,
+        controller: MarkdownEditorController? = nil,
         onPasteImage: ((NSPasteboard) -> String?)? = nil,
         onLinkClick: ((String) -> Void)? = nil,
         onCaretRectChange: ((CGRect) -> Void)? = nil,
@@ -176,6 +178,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         self.fontSize = fontSize
         self.documentId = documentId
         self.isEditable = isEditable
+        self.controller = controller
         self.onPasteImage = onPasteImage
         self.onLinkClick = onLinkClick
         self.onCaretRectChange = onCaretRectChange
@@ -278,7 +281,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         // Body compositing for the scroll-away header (clipsToBounds + redraw policy)
         // is applied by ScrollingHeaderController when a header is first supplied, so
         // header-less embedders keep AppKit's default rendering.
-        let font = NSFont(name: fontName, size: fontSize) ?? NSFont.systemFont(ofSize: fontSize)
+        let font = configuration.resolvedFont(name: fontName, size: fontSize)
         textView.font = font
         textView.baseFont = font
         textView.allowsUndo = true
@@ -328,12 +331,6 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
 
         context.coordinator.textView = textView
         context.coordinator.wikiLinkMetadata = initialState.metadata
-        context.coordinator.onCaretRectChange = onCaretRectChange
-        context.coordinator.onTextMutation = onTextMutation
-        context.coordinator.onBuildContextMenu = onBuildContextMenu
-        context.coordinator.onInlineSelectionChange = onInlineSelectionChange
-        context.coordinator.onInlinePreviewKey = onInlinePreviewKey
-        context.coordinator.onCodeBlockSelectionChange = onCodeBlockSelectionChange
 
         textView.recalcOverscroll(for: scrollView)
         textView.setPlaceholder(placeholder)
@@ -391,6 +388,8 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
             context.coordinator.updateCodeBlockSelection(textView: textView)
         }
         reconcileHeader(textView: textView, context: context)
+        context.coordinator.controller = controller
+        controller?.attach(to: context.coordinator)
         return scrollView
     }
 
@@ -398,6 +397,21 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         guard let textView = nsView.nativeTextView else {
             return
         }
+        context.coordinator.updateTextBinding($text)
+        context.coordinator.onLinkClick = onLinkClick
+        context.coordinator.onTextMutation = onTextMutation
+        context.coordinator.onCaretRectChange = onCaretRectChange
+        context.coordinator.onBuildContextMenu = onBuildContextMenu
+        context.coordinator.onInlineSelectionChange = onInlineSelectionChange
+        context.coordinator.onInlinePreviewKey = onInlinePreviewKey
+        context.coordinator.onCodeBlockSelectionChange = onCodeBlockSelectionChange
+        context.coordinator.onSpellCheckingPolicyChanged = onSpellCheckingPolicyChanged
+        if context.coordinator.controller !== controller {
+            context.coordinator.controller?.detach(from: context.coordinator)
+            context.coordinator.controller = controller
+            controller?.attach(to: context.coordinator)
+        }
+        controller?.scheduleRefresh()
         reconcileHeader(textView: textView, context: context)
 
         let isNodeSwitch = context.coordinator.documentId != documentId
@@ -541,11 +555,11 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         let newWikiFingerprint = configuration.services.wikiLinks.fingerprint()
         let imageChanged = newImageFingerprint != context.coordinator.lastImageFingerprint
         let wikiChanged = newWikiFingerprint != context.coordinator.lastWikiFingerprint
+        context.coordinator.configuration.services = configuration.services
+        textView.configuration.services = configuration.services
         if imageChanged || wikiChanged {
             context.coordinator.lastImageFingerprint = newImageFingerprint
             context.coordinator.lastWikiFingerprint = newWikiFingerprint
-            context.coordinator.configuration.services = configuration.services
-            textView.configuration.services = configuration.services
             // Only an image change needs a layout re-measure; a wiki-link rename is style-only.
             if imageChanged, let tlm = textView.textLayoutManager {
                 tlm.invalidateLayout(for: tlm.documentRange)
@@ -564,6 +578,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
             ? (context.coordinator.resolvedCaretColor ?? context.coordinator.configuration.theme.bodyText)
             : .clear
         let fontChanged = (context.coordinator.fontName != fontName) || (context.coordinator.fontSize != fontSize)
+            || context.coordinator.configuration.usesSystemFont != configuration.usesSystemFont
         if let pendingInlineReplacement {
             if pendingInlineReplacement.documentId == documentId,
                context.coordinator.lastAppliedInlineReplacementID != pendingInlineReplacement.id {
@@ -578,10 +593,16 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         }
         if context.coordinator.didInitialFormatting
             && context.coordinator.lastSyncedText == text
-            && !fontChanged {
+            && !fontChanged && !isNodeSwitch {
             return
         }
         if fontChanged {
+            context.coordinator.configuration.usesSystemFont = configuration.usesSystemFont
+            context.coordinator.configuration.paragraph = configuration.paragraph
+            context.coordinator.configuration.theme = configuration.theme
+            textView.configuration.usesSystemFont = configuration.usesSystemFont
+            textView.configuration.paragraph = configuration.paragraph
+            textView.configuration.theme = configuration.theme
             context.coordinator.didInitialFormatting = false
         }
         if isNodeSwitch {
@@ -625,7 +646,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
             (nsView as? ClampedScrollView)?.clampToInsets()
         }
 
-        let font = NSFont(name: fontName, size: fontSize) ?? NSFont.systemFont(ofSize: fontSize)
+        let font = configuration.resolvedFont(name: fontName, size: fontSize)
         textView.font = font
         textView.baseFont = font
         // Skip on switch: textView.string still holds the OUTGOING doc here, so the "?"
@@ -696,12 +717,6 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
             context.coordinator.updateCodeBlockSelection(textView: textView)
         }
 
-        context.coordinator.onCaretRectChange = onCaretRectChange
-        context.coordinator.onTextMutation = onTextMutation
-        context.coordinator.onBuildContextMenu = onBuildContextMenu
-        context.coordinator.onInlineSelectionChange = onInlineSelectionChange
-        context.coordinator.onInlinePreviewKey = onInlinePreviewKey
-        context.coordinator.onCodeBlockSelectionChange = onCodeBlockSelectionChange
         context.coordinator.didInitialFormatting = true
     }
 
@@ -715,6 +730,8 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
             onInlineSelectionChange: onInlineSelectionChange
         )
         coordinator.documentId = documentId
+        coordinator.onCaretRectChange = onCaretRectChange
+        coordinator.onBuildContextMenu = onBuildContextMenu
         coordinator.onPersistScrollOffset = onPersistScrollOffset
         coordinator.onTextMutation = onTextMutation
         coordinator.restoreScrollOffset = restoreScrollOffset
@@ -737,6 +754,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
     /// different screen — and that is the only moment left to record where the
     /// reader was; the coordinator's own offsets die with it.
     public static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        coordinator.controller?.detach(from: coordinator)
         // A restore still pending means the reader was never put back where they
         // were — recording the current offset would overwrite the good one with
         // the mid-load position.
