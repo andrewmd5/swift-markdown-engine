@@ -7,6 +7,7 @@ final class EditableTableOverlay: NSScrollView, NSTableViewDataSource, NSTableVi
     let table = NSTableView()
     var selectedCell = (row: 0, column: 0)
     private var isCommitting = false
+    private var committedSource: String?
     private var wasEditable = true
     private var measuredRows: [CGFloat] = []
     private var measuredWidth: CGFloat = 0
@@ -30,7 +31,7 @@ final class EditableTableOverlay: NSScrollView, NSTableViewDataSource, NSTableVi
         verticalScrollElasticity = .none
         table.style = .plain
         table.headerView = nil
-        table.rowHeight = 35
+        table.rowHeight = 42
         table.intercellSpacing = NSSize(width: 1, height: 1)
         table.gridStyleMask = [.solidHorizontalGridLineMask, .solidVerticalGridLineMask]
         updateColors()
@@ -51,11 +52,11 @@ final class EditableTableOverlay: NSScrollView, NSTableViewDataSource, NSTableVi
 
     private func updateColors() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            let color = (owner?.configuration.theme.mutedText ?? NSColor.secondaryLabelColor).withAlphaComponent(0.18)
+            let color = (owner?.configuration.theme.bodyText ?? NSColor.labelColor).withAlphaComponent(0.09)
             table.gridColor = color
             wantsLayer = true
-            layer?.cornerRadius = 6
-            layer?.borderWidth = 1
+            layer?.cornerRadius = 10
+            layer?.borderWidth = 1 / (window?.backingScaleFactor ?? 2)
             layer?.borderColor = color.cgColor
             layer?.masksToBounds = true
         }
@@ -80,15 +81,17 @@ final class EditableTableOverlay: NSScrollView, NSTableViewDataSource, NSTableVi
         field.lineBreakMode = .byWordWrapping
         field.maximumNumberOfLines = 0
         field.cell?.isScrollable = true
-        let cell = NSTableCellView()
+        let cell = EditableTableCellView()
+        cell.tint = owner?.configuration.theme.link ?? .controlAccentColor
+        cell.fill = (owner?.configuration.theme.bodyText ?? .labelColor).withAlphaComponent(row == 0 ? 0.045 : 0)
         cell.textField = field
         cell.addSubview(field)
         field.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            field.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
-            field.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
-            field.topAnchor.constraint(equalTo: cell.topAnchor, constant: 8),
-            field.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -8),
+            field.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12),
+            field.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -12),
+            field.topAnchor.constraint(equalTo: cell.topAnchor, constant: 10),
+            field.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -10),
         ])
         return cell
     }
@@ -101,7 +104,7 @@ final class EditableTableOverlay: NSScrollView, NSTableViewDataSource, NSTableVi
             measuredWidth = width
             measuredFont = font
         }
-        return measuredRows.indices.contains(row) ? measuredRows[row] : 35
+        return measuredRows.indices.contains(row) ? measuredRows[row] : 42
     }
 
     private func formattedCell(row: Int, column: Int) -> NSAttributedString {
@@ -133,6 +136,7 @@ final class EditableTableOverlay: NSScrollView, NSTableViewDataSource, NSTableVi
             editor.setSelectedRange(NSRange(location: 0, length: raw.utf16.count))
         }
         owner?.activeTableEditor = self
+        (cell.superview as? EditableTableCellView)?.isEditing = true
         owner?.breakUndoCoalescing()
         (owner?.delegate as? NativeTextViewCoordinator)?.controller?.scheduleRefresh()
     }
@@ -148,6 +152,7 @@ final class EditableTableOverlay: NSScrollView, NSTableViewDataSource, NSTableVi
         owner?.breakUndoCoalescing()
         if let cell = notification.object as? TableCellField,
            model.rows.indices.contains(cell.row), model.rows[cell.row].indices.contains(cell.column) {
+            (cell.superview as? EditableTableCellView)?.isEditing = false
             cell.attributedStringValue = formattedCell(row: cell.row, column: cell.column)
         }
     }
@@ -253,7 +258,7 @@ final class EditableTableOverlay: NSScrollView, NSTableViewDataSource, NSTableVi
         focus(row: min(row, model.rows.count - 1), column: min(column, model.columnCount - 1))
     }
 
-    func update(model: EditableMarkdownTable, range: NSRange) {
+    func update(model: EditableMarkdownTable, range: NSRange, source: String) {
         sourceRange = range
         let editable = owner?.isEditable ?? false
         let changed = wasEditable != editable
@@ -261,10 +266,36 @@ final class EditableTableOverlay: NSScrollView, NSTableViewDataSource, NSTableVi
         if !editable, owner?.activeTableEditor === self, let owner {
             window?.makeFirstResponder(owner)
         }
-        guard !isCommitting, self.model.source.string != model.source.string || changed else { return }
+        guard !isCommitting, committedSource != source || changed else { return }
+        guard self.model.source.string != model.source.string || changed else { return }
+        committedSource = nil
+        let structureChanged = self.model.rows.count != model.rows.count || self.model.columnCount != model.columnCount
         self.model = model
         selectedCell = (min(selectedCell.row, model.rows.count - 1), min(selectedCell.column, model.columnCount - 1))
-        rebuildColumns()
+        if structureChanged {
+            let wasEditing = owner?.activeTableEditor === self
+            rebuildColumns()
+            if wasEditing, editable { focus(row: selectedCell.row, column: selectedCell.column) }
+        } else {
+            for row in model.rows.indices {
+                for column in 0..<model.columnCount {
+                    guard let cell = table.view(atColumn: column, row: row, makeIfNecessary: false) as? NSTableCellView,
+                          let field = cell.textField else { continue }
+                    field.isEditable = editable
+                    if let editor = field.currentEditor() as? NSTextView {
+                        let selection = editor.selectedRange()
+                        let raw = model.rows[row][column].string.replacingOccurrences(of: "\\|", with: "|")
+                        field.stringValue = raw
+                        editor.string = raw
+                        let start = min(selection.location, raw.utf16.count)
+                        editor.setSelectedRange(NSRange(location: start, length: min(selection.length, raw.utf16.count - start)))
+                    } else {
+                        field.attributedStringValue = formattedCell(row: row, column: column)
+                    }
+                }
+            }
+            invalidateRowHeights()
+        }
     }
 
     private func rebuildColumns() {
@@ -286,14 +317,19 @@ final class EditableTableOverlay: NSScrollView, NSTableViewDataSource, NSTableVi
         let source = model.source
         guard owner.shouldChangeText(in: sourceRange, replacementString: source.string) else { return }
         isCommitting = true
+        committedSource = source.string
         storage.replaceCharacters(in: sourceRange, with: source)
         sourceRange.length = source.length
         owner.didChangeText()
         isCommitting = false
+        invalidateRowHeights()
+        (owner.delegate as? NativeTextViewCoordinator)?.controller?.scheduleRefresh()
+    }
+
+    private func invalidateRowHeights() {
         measuredRows = []
         table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<model.rows.count))
         needsLayout = true
-        (owner.delegate as? NativeTextViewCoordinator)?.controller?.scheduleRefresh()
     }
 
     private func leaveTable(before: Bool = false) {
@@ -308,4 +344,22 @@ final class EditableTableOverlay: NSScrollView, NSTableViewDataSource, NSTableVi
 private final class TableCellField: NSTextField {
     var row = 0
     var column = 0
+}
+
+private final class EditableTableCellView: NSTableCellView {
+    var tint: NSColor = .controlAccentColor
+    var fill: NSColor = .clear
+    var isEditing = false { didSet { needsDisplay = true } }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        (isEditing ? tint.withAlphaComponent(0.045) : fill).setFill()
+        bounds.fill()
+        if isEditing {
+            tint.withAlphaComponent(0.6).setStroke()
+            let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 4, yRadius: 4)
+            ring.lineWidth = 1
+            ring.stroke()
+        }
+    }
 }

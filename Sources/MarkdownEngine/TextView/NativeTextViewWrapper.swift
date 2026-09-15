@@ -577,8 +577,10 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
                 context.coordinator.restyleParagraphs([fullRange], in: textView)
             }
         }
+        let editingChanged = textView.isEditable != isEditable
         textView.isEditable = isEditable
         textView.isSelectable = true
+        if editingChanged { textView.updateEditableTableOverlays() }
         // Keep the caret ink the selection handler resolved (an extension span
         // can invert it); a plain bodyText reset here stomps it on every pass.
         textView.insertionPointColor = isEditable

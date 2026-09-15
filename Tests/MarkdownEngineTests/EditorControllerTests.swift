@@ -165,6 +165,48 @@ struct EditorControllerTests {
     #expect(native.editableTableOverlays.isEmpty)
   }
 
+  @Test("Typing words and spaces keeps the same table cell and insertion point")
+  func tableTypingKeepsFocus() async throws {
+    let state = EditorState(text: "| Name | Detail |\n| --- | --- |\n| Alice | before |\n")
+    state.configuration.editsTablesInPlace = true
+    let fixture = try EditorFixture(state: state)
+    defer { fixture.window.close() }
+    await fixture.settle()
+    let native = try #require(fixture.editor as? NativeTextView)
+    let overlay = try #require(native.editableTableOverlays.values.first)
+    overlay.focus(row: 1, column: 1)
+    let field = try #require((overlay.table.view(atColumn: 1, row: 1, makeIfNecessary: true) as? NSTableCellView)?.textField)
+    let editor = try #require(field.currentEditor() as? NSTextView)
+    var typed = ""
+    for character in "Two  words 日本語 " {
+      let next = String(character)
+      editor.insertText(next, replacementRange: editor.selectedRange())
+      typed += next
+      await fixture.settle()
+      try #require(field.currentEditor() === editor)
+      #expect(fixture.window.firstResponder === editor)
+      #expect(editor.string == typed)
+      #expect(editor.selectedRange() == NSRange(location: typed.utf16.count, length: 0))
+    }
+    editor.deleteBackward(nil)
+    await fixture.settle()
+    #expect(editor.string == "Two  words 日本語")
+    #expect(state.text.contains("| Two  words 日本語 |"))
+    #expect(field.currentEditor() === editor)
+    state.text = state.text.replacingOccurrences(of: "Two  words 日本語", with: "Updated by caller")
+    await fixture.settle()
+    #expect(field.currentEditor() === editor)
+    #expect(editor.string == "Updated by caller")
+    #expect(editor.selectedRange().location <= editor.string.utf16.count)
+    editor.insertText("!", replacementRange: editor.selectedRange())
+    await fixture.settle()
+    #expect(state.text.contains("!"))
+    state.isEnabled = false
+    await fixture.settle()
+    #expect(!field.isEditable)
+    #expect(field.currentEditor() == nil)
+  }
+
   @Test("Table edits retain subject identifiers and escaped pipes")
   func tableReferenceIdentity() async throws {
     let original = "| Name | Detail |\n| --- | --- |\n| [[Alice|person-id]] | before |\n"
@@ -253,7 +295,7 @@ private struct EditorTestView: View {
   var body: some View {
     NativeTextViewWrapper(
       text: $state.text, configuration: state.configuration, fontName: "Helvetica", fontSize: 14,
-      documentId: state.documentID, controller: state.controller
+      documentId: state.documentID, isEditable: state.isEnabled, controller: state.controller
     ).frame(width: 317, height: 160).disabled(!state.isEnabled)
   }
 }
@@ -270,6 +312,7 @@ private struct EditorFixture {
     window = NSWindow(
       contentRect: hosting.frame, styleMask: [.titled, .closable], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
+    window.appearance = NSAppearance(named: .aqua)
     window.contentView = hosting
     hosting.layoutSubtreeIfNeeded()
     editor = try #require(Self.textView(in: hosting))

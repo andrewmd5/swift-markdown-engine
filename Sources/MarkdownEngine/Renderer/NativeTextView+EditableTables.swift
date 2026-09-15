@@ -39,7 +39,7 @@ extension NativeTextView {
             let overlay: EditableTableOverlay
             if let existing = editableTableOverlays[range.location] {
                 overlay = existing
-                overlay.update(model: model, range: range)
+                overlay.update(model: model, range: range, source: storage.attributedSubstring(from: range).string)
             } else {
                 overlay = EditableTableOverlay(owner: self, range: range, model: model)
                 addSubview(overlay)

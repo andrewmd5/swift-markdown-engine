@@ -46,16 +46,16 @@ struct EditableMarkdownTable {
 
     var columnCount: Int { separators.count }
     func rowHeights(in width: CGFloat, font: NSFont, configuration: MarkdownEditorConfiguration) -> [CGFloat] {
-        let cellWidth = self.width(in: width) / CGFloat(columnCount) - 17
+        let cellWidth = self.width(in: width) / CGFloat(columnCount) - 25
         return rows.enumerated().map { row, cells in
             cells.map { cell in
                 let content = MarkdownStyler.formattedCellString(
                     cell.string, baseFont: font, header: row == 0, theme: configuration.theme,
                     codeBackgroundColor: configuration.services.syntaxHighlighter.backgroundColor(),
                     latex: configuration.services.latex, extensions: configuration.extensions)
-                return max(35, ceil(content.boundingRect(with: NSSize(width: cellWidth, height: .greatestFiniteMagnitude),
-                    options: [.usesLineFragmentOrigin, .usesFontLeading]).height) + 16)
-            }.max() ?? 35
+                return max(42, ceil(content.boundingRect(with: NSSize(width: cellWidth, height: .greatestFiniteMagnitude),
+                    options: [.usesLineFragmentOrigin, .usesFontLeading]).height) + 20)
+            }.max() ?? 42
         }
     }
 
