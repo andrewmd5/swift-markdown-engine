@@ -46,7 +46,10 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
     /// the now-stale undo stack is dropped. Pruned alongside `undoManagers`.
     var undoContentSnapshots: [String: String] = [:]
     @Binding var text: String
-    @Binding var isWikiLinkActive: Bool
+    var wikiLinkActiveBinding: Binding<Bool>
+    var isWikiLinkActive = false {
+        didSet { if isWikiLinkActive != oldValue { wikiLinkActiveBinding.wrappedValue = isWikiLinkActive } }
+    }
     var fontName: String
     var fontSize: CGFloat
     var configuration: MarkdownEditorConfiguration = .default {
@@ -77,6 +80,7 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
     var headerController: ScrollingHeaderController?
     var layoutBridge: LayoutBridge?
     var layoutDelegate: MarkdownLayoutManagerDelegate?
+    var onTagClick: ((String) -> Void)?
     var onLinkClick: ((String) -> Void)?
     var onCaretRectChange: ((CGRect) -> Void)?
     var onTextMutation: ((MarkdownTextMutation) -> Void)?
@@ -289,7 +293,8 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
         _text = text
         self.fontName = fontName
         self.fontSize = fontSize
-        _isWikiLinkActive = isWikiLinkActive
+        wikiLinkActiveBinding = isWikiLinkActive
+        self.isWikiLinkActive = isWikiLinkActive.wrappedValue
         self.onLinkClick = onLinkClick
         self.onCaretRectChange = nil
         self.onInlineSelectionChange = onInlineSelectionChange

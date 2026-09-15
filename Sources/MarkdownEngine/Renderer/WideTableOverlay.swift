@@ -212,6 +212,7 @@ extension NativeTextView {
 
     /// Walk storage; create / position / destroy overlays to match attrs.
     func performWideTableOverlayUpdate() {
+        updateEditableTableOverlays()
         guard let storage = textStorage,
               let bridge = layoutBridge,
               let container = bridge.firstTextContainer,

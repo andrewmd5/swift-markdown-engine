@@ -315,6 +315,7 @@ public struct MarkdownEditorBus: Sendable {
 /// dependencies exclusively from this container; embedders inject the
 /// implementations they want.
 public struct MarkdownEditorServices: Sendable {
+    public var tags: (any MarkdownTagProvider)?
     public var wikiLinks: any WikiLinkResolver
     public var images: any EmbeddedImageProvider
     public var syntaxHighlighter: any SyntaxHighlighter
@@ -326,8 +327,10 @@ public struct MarkdownEditorServices: Sendable {
         images: any EmbeddedImageProvider = NoOpEmbeddedImageProvider(),
         syntaxHighlighter: any SyntaxHighlighter = PlainTextSyntaxHighlighter(),
         latex: any LatexRenderer = NoOpLatexRenderer(),
-        bus: MarkdownEditorBus = .default
+        bus: MarkdownEditorBus = .default,
+        tags: (any MarkdownTagProvider)? = nil
     ) {
+        self.tags = tags
         self.wikiLinks = wikiLinks
         self.images = images
         self.syntaxHighlighter = syntaxHighlighter

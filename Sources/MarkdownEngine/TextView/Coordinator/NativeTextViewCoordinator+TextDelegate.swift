@@ -721,9 +721,14 @@ extension NativeTextViewCoordinator {
         if inlineContext == nil, isTyping, !tv.hasMarkedText(),
            let selection = unfinishedWikiLink(in: nsText, at: selLocation, codeTokens: codeTokens) {
             inlineSelectionState = InlineSelectionState(kind: .wikiLink, selection: selection)
+            if let rect = tv.viewRect(forCharacterRange: tv.selectedRange(), using: layoutBridge) {
+                DispatchQueue.main.async { self.onCaretRectChange?(rect) }
+            }
         }
 
+        let selectionDocumentID = documentId
         DispatchQueue.main.async {
+            guard self.documentId == selectionDocumentID else { return }
             self.isWikiLinkActive = inlineSelectionState?.kind == .wikiLink
             self.isImageEmbedActive = isInsideImageEmbed
             self.onInlineSelectionChange?(inlineSelectionState)
@@ -979,6 +984,7 @@ extension NativeTextViewCoordinator {
             switch commandSelector {
             case #selector(NSResponder.moveUp(_:)): key = .moveUp
             case #selector(NSResponder.moveDown(_:)): key = .moveDown
+            case #selector(NSResponder.insertTab(_:)): key = .confirm
             case #selector(NSResponder.insertNewline(_:)): key = .confirm   // ⌘↵ → handled in performKeyEquivalent
             case #selector(NSResponder.cancelOperation(_:)): key = .cancel
             default: key = nil
@@ -992,6 +998,11 @@ extension NativeTextViewCoordinator {
         // Record that the delegate ran this press, so mouseDown's fallback knows
         // AppKit didn't drop the dispatch.
         (textView as? NativeTextView)?.linkClickDidFire = true
+        if let value = link as? String, value.hasPrefix("markdown-tag:") {
+            (textView as? NativeTextView)?.linkClickDidNavigate = true
+            onTagClick?(String(value.dropFirst("markdown-tag:".count)))
+            return true
+        }
         // Edit zone: a click on the outer ~30% of a link's first/last visible char places the caret
         // just outside the markers (before '[[' / '[' , after ']]' / ')') to reveal the source for
         // editing instead of navigating. Applies to both wiki links [[…]] and web links [text](url).

@@ -27,6 +27,8 @@ import Foundation
 /// defaults used by the Nodes app and have been chosen empirically.
 public struct MarkdownEditorConfiguration: Sendable {
 
+    public var recognizesHashtags = false
+    public var editsTablesInPlace = false
     public var usesSystemFont: Bool
     public var theme: MarkdownEditorTheme
     public var services: MarkdownEditorServices
@@ -208,15 +210,18 @@ public struct ScrollersPolicy: Sendable {
     public var hasVerticalScroller: Bool
     public var hasHorizontalScroller: Bool
     public var autohidesScrollers: Bool
+    public var allowsScrollChaining: Bool
 
     public init(
         hasVerticalScroller: Bool = true,
         hasHorizontalScroller: Bool = false,
-        autohidesScrollers: Bool = true
+        autohidesScrollers: Bool = true,
+        allowsScrollChaining: Bool = true
     ) {
         self.hasVerticalScroller = hasVerticalScroller
         self.hasHorizontalScroller = hasHorizontalScroller
         self.autohidesScrollers = autohidesScrollers
+        self.allowsScrollChaining = allowsScrollChaining
     }
 
     public static let `default` = ScrollersPolicy()

@@ -12,6 +12,7 @@ final class ClampedScrollView: NSScrollView {
     /// When true, the scroll view has no scrollable range — the editor reports its
     /// own height to SwiftUI and the enclosing scroll view owns paging.
     var fitsContent: Bool = false
+    var allowsScrollChaining = true
 
     /// Saved at the start of every live-resize (including spurious one-click resizes triggered by edge-cursor clicks) so the position is restored when the resize ends. Without this, NSScrollView's default top-anchor-during-resize would jolt a bottom-anchored user back up by hundreds of points on a single edge click.
     private var scrollYBeforeLiveResize: CGFloat?
@@ -83,6 +84,21 @@ final class ClampedScrollView: NSScrollView {
             // default responder-chain traversal still routes the event up.
             nextResponder?.scrollWheel(with: event)
             return
+        }
+        if !allowsScrollChaining {
+            clampToInsets()
+            let height = (documentView as? NativeTextViewContainer)?.scrollableContentHeight
+                ?? documentView?.bounds.height ?? 0
+            let minimum = -contentInsets.top
+            let maximum = max(minimum, height - contentView.bounds.height)
+            let y = contentView.bounds.minY
+            let delta = event.scrollingDeltaY * (event.hasPreciseScrollingDeltas ? 1 : verticalLineScroll)
+            let target = y - delta
+            if delta > 0 && target <= minimum || delta < 0 && target >= maximum {
+                contentView.scroll(to: CGPoint(x: contentView.bounds.minX, y: min(max(target, minimum), maximum)))
+                reflectScrolledClipView(contentView)
+                return
+            }
         }
         super.scrollWheel(with: event)
         clampToInsets()

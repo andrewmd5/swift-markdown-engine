@@ -18,6 +18,7 @@ import UniformTypeIdentifiers
 
 final class NativeTextView: NSTextView {
     override func becomeFirstResponder() -> Bool {
+        activeTableEditor = nil
         let result = super.becomeFirstResponder()
         (delegate as? NativeTextViewCoordinator)?.controller?.scheduleRefresh()
         return result
@@ -25,7 +26,13 @@ final class NativeTextView: NSTextView {
 
     override func resignFirstResponder() -> Bool {
         let result = super.resignFirstResponder()
-        (delegate as? NativeTextViewCoordinator)?.controller?.scheduleRefresh()
+        let coordinator = delegate as? NativeTextViewCoordinator
+        coordinator?.controller?.scheduleRefresh()
+        DispatchQueue.main.async { [weak self, weak coordinator] in
+            guard let self, self.window?.firstResponder !== self else { return }
+            coordinator?.isWikiLinkActive = false
+            coordinator?.onInlineSelectionChange?(nil)
+        }
         return result
     }
 
@@ -41,6 +48,9 @@ final class NativeTextView: NSTextView {
     var pendingFullLayoutMeasure = false
     /// Coalesces wide-table overlay updates to once per runloop (resize fires many per frame).
     var pendingWideTableOverlayUpdate = false
+    var editableTableOverlays: [Int: EditableTableOverlay] = [:]
+    weak var activeTableEditor: EditableTableOverlay?
+    var editableTableDocumentID: String?
     var suppressAutoRevealOnce: Bool = false
     // Set by clickedOnLink during a mouseDown: did the delegate fire (so
     // mouseDown can re-dispatch a click AppKit dropped), and did it navigate

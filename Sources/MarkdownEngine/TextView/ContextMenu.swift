@@ -86,21 +86,26 @@ extension NativeTextViewWrapper.Coordinator {
     }
 
     func isSelectionUnderlined(in nsText: NSString, range: NSRange) -> Bool {
-        enclosingToken(of: .extensionSpan(UnderlineExtension.identifier), for: range, in: nsText as String) != nil
+        underlineToken(for: range, in: nsText as String) != nil
+    }
+
+    private func underlineToken(for range: NSRange, in text: String) -> MarkdownToken? {
+        enclosingToken(of: .extensionSpan(UnderlineExtension.identifier), for: range, in: text)
+            ?? enclosingToken(of: .extensionSpan(HTMLUnderlineExtension.identifier), for: range, in: text)
     }
 
     func toggleUnderline() {
         guard let tv = textView else { return }
         let selection = tv.selectedRange()
-        if let token = enclosingToken(of: .extensionSpan(UnderlineExtension.identifier), for: selection, in: tv.string) {
+        if let token = underlineToken(for: selection, in: tv.string) {
             unwrapToken(token, leftReplacement: "", rightReplacement: "")
             return
         }
         let source = tv.string as NSString
         let range = selection.length == 0 ? wordRange(at: selection.location, in: source) ?? selection : selection
         let content = source.substring(with: range)
-        guard replacePreservingAttributes(in: range, with: "<u>" + content + "</u>", retaining: range, at: 3) else { return }
-        tv.setSelectedRange(NSRange(location: selection.location + 3, length: selection.length))
+        guard replacePreservingAttributes(in: range, with: "__" + content + "__", retaining: range, at: 2) else { return }
+        tv.setSelectedRange(NSRange(location: selection.location + 2, length: selection.length))
     }
 
     func applyChecklist() { applyList(prefix: "- [ ] ") }

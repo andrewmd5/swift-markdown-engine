@@ -80,6 +80,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
     /// Fires when the user clicks a `[[Name]]` link. The argument is the
     /// resolved opaque identifier (or the display name when no resolver
     /// was supplied).
+    public var onTagClick: ((String) -> Void)?
     public var onLinkClick: ((String) -> Void)?
     /// Fires whenever the caret rect inside an active wiki-link changes,
     /// so embedders can position a follow-the-caret UI.
@@ -154,6 +155,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         controller: MarkdownEditorController? = nil,
         onPasteImage: ((NSPasteboard) -> String?)? = nil,
         onLinkClick: ((String) -> Void)? = nil,
+        onTagClick: ((String) -> Void)? = nil,
         onCaretRectChange: ((CGRect) -> Void)? = nil,
         onTextMutation: ((MarkdownTextMutation) -> Void)? = nil,
         onBuildContextMenu: ((NSMenu, NSRange) -> NSMenu)? = nil,
@@ -181,6 +183,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         self.controller = controller
         self.onPasteImage = onPasteImage
         self.onLinkClick = onLinkClick
+        self.onTagClick = onTagClick
         self.onCaretRectChange = onCaretRectChange
         self.onTextMutation = onTextMutation
         self.onBuildContextMenu = onBuildContextMenu
@@ -222,6 +225,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
     public func makeNSView(context: Context) -> NSScrollView {
         let scrollView = ClampedScrollView()
         scrollView.fitsContent = configuration.heightBehavior == .fitsContent
+        scrollView.allowsScrollChaining = configuration.scrollers.allowsScrollChaining
         scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = configuration.heightBehavior.wantsVerticalScroller(for: configuration.scrollers)
         scrollView.hasHorizontalScroller = configuration.scrollers.hasHorizontalScroller
@@ -398,7 +402,9 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
             return
         }
         context.coordinator.updateTextBinding($text)
+        context.coordinator.wikiLinkActiveBinding = $isWikiLinkActive
         context.coordinator.onLinkClick = onLinkClick
+        context.coordinator.onTagClick = onTagClick
         context.coordinator.onTextMutation = onTextMutation
         context.coordinator.onCaretRectChange = onCaretRectChange
         context.coordinator.onBuildContextMenu = onBuildContextMenu
@@ -474,6 +480,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         let heightBehaviorChanged = textView.configuration.heightBehavior != configuration.heightBehavior
         if let clamped = nsView as? ClampedScrollView {
             clamped.fitsContent = configuration.heightBehavior == .fitsContent
+            clamped.allowsScrollChaining = configuration.scrollers.allowsScrollChaining
         }
         textView.configuration.heightBehavior = configuration.heightBehavior
         context.coordinator.configuration.heightBehavior = configuration.heightBehavior
@@ -729,6 +736,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
             onLinkClick: onLinkClick,
             onInlineSelectionChange: onInlineSelectionChange
         )
+        coordinator.onTagClick = onTagClick
         coordinator.documentId = documentId
         coordinator.onCaretRectChange = onCaretRectChange
         coordinator.onBuildContextMenu = onBuildContextMenu

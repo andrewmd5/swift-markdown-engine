@@ -5,6 +5,19 @@ public enum MarkdownEditingAction: Equatable, Sendable {
     case bold, italic, underline, strikethrough
     case heading(Int), unorderedList, orderedList, checklist
     case insertText(String), insertTable
+    case table(MarkdownTableAction)
+}
+
+public enum MarkdownTableAction: Equatable, Sendable {
+    case addRowAbove, addRowBelow, deleteRow
+    case addColumnBefore, addColumnAfter, deleteColumn, deleteTable
+}
+
+public struct MarkdownTableSelection: Equatable, Sendable {
+    public let row: Int
+    public let column: Int
+    public let rowCount: Int
+    public let columnCount: Int
 }
 
 public struct MarkdownEditorSelection: Equatable, Sendable {
@@ -14,6 +27,7 @@ public struct MarkdownEditorSelection: Equatable, Sendable {
     public var isUnderlined = false
     public var isStruckThrough = false
     public var headingLevel = 0
+    public var table: MarkdownTableSelection?
 }
 
 @MainActor @Observable
@@ -43,6 +57,18 @@ public final class MarkdownEditorController {
     public func apply(_ action: MarkdownEditingAction) {
         guard let coordinator, let view = coordinator.textView,
               view.isEditable, !view.hasMarkedText() else { return }
+        if case .table(let action) = action, let editor = (view as? NativeTextView)?.activeTableEditor {
+            view.breakUndoCoalescing()
+            editor.apply(action)
+            view.breakUndoCoalescing()
+            scheduleRefresh()
+            return
+        }
+        if let table = (view as? NativeTextView)?.activeTableEditor {
+            table.applyInlineAction(action)
+            scheduleRefresh()
+            return
+        }
         focus()
         view.breakUndoCoalescing()
         view.undoManager?.beginUndoGrouping()
@@ -52,6 +78,7 @@ public final class MarkdownEditorController {
             scheduleRefresh()
         }
         switch action {
+        case .table: break
         case .bold: coordinator.didMarkdownBold(nil)
         case .italic: coordinator.didMarkdownItalic(nil)
         case .underline: coordinator.toggleUnderline()
@@ -72,6 +99,11 @@ public final class MarkdownEditorController {
             let prefix = location == 0 ? "" : source.character(at: location - 1) == 10 ? "\n" : "\n\n"
             view.insertText(prefix + "|  |  |\n| --- | --- |\n|  |  |\n", replacementRange: view.selectedRange())
             view.setSelectedRange(NSRange(location: location + prefix.utf16.count + 2, length: 0))
+            DispatchQueue.main.async { [weak view] in
+                guard let native = view as? NativeTextView else { return }
+                native.updateEditableTableOverlays()
+                native.editableTableOverlays[location + prefix.utf16.count]?.focus(row: 0, column: 0)
+            }
         }
     }
 
@@ -112,6 +144,10 @@ public final class MarkdownEditorController {
             isUnderlined: coordinator.isSelectionUnderlined(in: source, range: range),
             isStruckThrough: coordinator.isSelectionStrikethrough(in: source, range: range),
             headingLevel: (1...6).first { coordinator.isSelectionHeading(level: $0, in: source, range: range) } ?? 0)
+        if let editor = (view as? NativeTextView)?.activeTableEditor {
+            selection.table = MarkdownTableSelection(row: editor.selectedCell.row, column: editor.selectedCell.column,
+                rowCount: editor.model.rows.count, columnCount: editor.model.columnCount)
+        }
         isFocused = view.window?.firstResponder === view
         canEdit = view.isEditable && !view.hasMarkedText()
     }

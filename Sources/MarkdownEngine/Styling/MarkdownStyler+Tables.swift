@@ -183,14 +183,14 @@ extension MarkdownStyler {
         let tableIndexed = ctx.tableIndexed
         var neededLengths: Set<Int> = []
         for (idx, token) in tableIndexed
-        where !ctx.activeTokenIndices.contains(idx) && !ctx.outsideScope(token.range) {
+        where (!ctx.activeTokenIndices.contains(idx) || ctx.configuration.editsTablesInPlace) && !ctx.outsideScope(token.range) {
             neededLengths.insert(token.range.length)
         }
         var skippedCount = 0
         var metaNanos: UInt64 = 0
         for (idx, token) in tableIndexed {
             tableCount += 1
-            if !ctx.activeTokenIndices.contains(idx),
+            if (!ctx.activeTokenIndices.contains(idx) || ctx.configuration.editsTablesInPlace),
                !neededLengths.contains(token.range.length) {
                 skippedCount += 1
                 continue
@@ -209,7 +209,7 @@ extension MarkdownStyler {
             let occurrenceIndex = occurrenceByContentHash[meta.hash, default: 0]
             occurrenceByContentHash[meta.hash] = occurrenceIndex + 1
 
-            let isActive = ctx.activeTokenIndices.contains(idx)
+            let isActive = ctx.activeTokenIndices.contains(idx) && !ctx.configuration.editsTablesInPlace
             if isActive {
                 // Caret inside the table — show editable source, pipes muted like other syntax.
                 let muted = ctx.configuration.theme.mutedText
@@ -239,6 +239,18 @@ extension MarkdownStyler {
             // only exceeds it when the per-column floors genuinely don't fit,
             // in which case the scrollable overlay below takes over.
             let containerWidth = effectiveContainerWidth(for: ctx)
+            if ctx.configuration.editsTablesInPlace,
+               let model = EditableMarkdownTable(NSAttributedString(string: source)) {
+                let extra: CGFloat = model.width(in: containerWidth) > containerWidth + 0.5 ? 14 : 0
+                let bounds = CGRect(x: 0, y: 0, width: containerWidth, height: model.height(in: containerWidth, font: ctx.baseFont, configuration: ctx.configuration) + extra)
+                _ = appendRenderedStandaloneBlock(
+                    for: token, rawContent: source, image: NSImage(size: bounds.size), imageBounds: bounds,
+                    paragraphSpacingBefore: ctx.baseDefaultLineHeight * 0.5,
+                    paragraphSpacing: ctx.baseDefaultLineHeight * 0.5, alignment: .left,
+                    mode: .collapsedSource(markerTexts: []), restyleOnWidthChange: true, ctx: ctx, attrs: &attrs)
+                attrs.append((NSRange(location: token.range.location, length: 1), [.editableTableAnchor: true]))
+                continue
+            }
             let (image, rendered) = tableImage(
                 for: source,
                 parsed: parsed,

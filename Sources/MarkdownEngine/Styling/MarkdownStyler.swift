@@ -259,6 +259,19 @@ enum MarkdownStyler {
         result += styleImageLinks(ctx)
         let imgMs = Double(DispatchTime.now().uptimeNanoseconds - imgT0) / 1_000_000
         result += styleTables(ctx)
+        if configuration.recognizesHashtags {
+            let tags = configuration.services.tags?.tags(in: text) ?? MarkdownTagScanner.tags(in: text, tokens: tokens)
+            for tag in tags {
+                guard tag.range.location >= 0, tag.range.location <= nsText.length,
+                      tag.range.length > 0, tag.range.length <= nsText.length - tag.range.location,
+                      nsText.substring(with: tag.range) == "#" + tag.name else { continue }
+                result.append((tag.range, [
+                    .foregroundColor: configuration.theme.link,
+                    .backgroundColor: configuration.theme.link.withAlphaComponent(0.07),
+                    .link: "markdown-tag:" + tag.name,
+                ]))
+            }
+        }
         PerfTrace.note { "  styleAttributes: ast=\(String(format: "%.2f", astMs))ms latex+img4=\(String(format: "%.2f", imgMs))ms styledRanges=\(result.count)" }
         return result
     }
